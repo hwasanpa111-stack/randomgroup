@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>스마트 교실 모둠 자동 편성기</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap');
+    body { font-family: 'Pretendard', sans-serif; }
+    
+    @keyframes flipSlot {
+      0% { transform: rotateX(90deg); opacity: 0; }
+      100% { transform: rotateX(0deg); opacity: 1; }
+    }
+    .animate-flip {
+      animation: flipSlot 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); }
+      50% { box-shadow: 0 0 25px rgba(168, 85, 247, 0.7); }
+    }
+    .animate-glow {
+      animation: pulseGlow 1.5s infinite;
+    }
+    
+    /* 드래그 앤 드롭 스타일 */
+    .dragging {
+      opacity: 0.4;
+      transform: scale(0.95);
+    }
+    .drop-over {
+      border-color: #6366f1 !important;
+      background-color: rgba(99, 102, 241, 0.15) !important;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-3 sm:p-5 select-none pb-16">
+
+  <div class="max-w-6xl mx-auto space-y-4">
+
+    <!-- 상단 헤더 & 핵심 컨트롤 바 -->
+    <header class="bg-slate-900/95 border border-slate-800 rounded-3xl p-4 sm:p-5 backdrop-blur shadow-2xl flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center font-black text-xl shadow-lg shadow-indigo-500/25 text-white">
+          <i class="fa-solid fa-users-gear"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl sm:text-2xl font-black tracking-tight text-white">
+              스마트 모둠 편성기
+            </h1>
+          </div>
+        </div>
+      </div>
+
+      <!-- 상단 우측 버튼 그룹 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- 칠판 모드 전환 -->
+        <button id="btnTogglePresentation" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-bold border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-expand text-amber-400"></i>
+          <span id="txtPresentation">칠판 집중 모드</span>
+        </button>
+
+        <!-- 오늘 날짜 및 요일 표시 위장 버튼 (클릭 시 조건 설정 모달 오픈) -->
+        <button id="btnOpenConfigModal" class="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs sm:text-sm font-semibold border border-slate-700/80 flex items-center gap-2 transition cursor-pointer select-none">
+          <i class="fa-regular fa-calendar-check text-indigo-400 text-xs"></i>
+          <span id="headerLiveDate">2026. 10. 29. (목)</span>
+          <span id="activeRulesBadge" class="hidden w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+        </button>
+
+        <!-- 모둠 섞기 시작 메인 버튼 -->
+        <button id="btnRunShuffle" class="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition active:scale-95">
+          <i class="fa-solid fa-dice text-base"></i> 🎲 모둠 편성 시작!
+        </button>
+      </div>
+    </header>
+
+    <!-- 빠른 옵션 바 (칠판 모드 시에도 기본 조절 가능) -->
+    <div id="quickSettingsBar" class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 px-4 flex flex-wrap items-center justify-between text-xs text-slate-300 gap-3">
+      <div class="flex flex-wrap items-center gap-4">
+        <!-- 모둠 구성 방식 -->
+        <div class="flex items-center gap-2 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800">
+          <span class="text-slate-400 font-medium">편성 기준:</span>
+          <select id="selectGroupMode" class="bg-slate-900 text-amber-300 font-bold rounded px-1.5 py-0.5 border border-slate-700 focus:outline-none text-xs">
+            <option value="byGroupCount">총 모둠 수 기준</option>
+            <option value="byMemberCount">모둠당 인원수 기준</option>
+          </select>
+          <input type="number" id="inputGroupTargetValue" min="2" max="20" value="6" class="w-12 bg-slate-900 text-center font-black text-white px-1 py-0.5 rounded border border-slate-700 focus:outline-none">
+          <span id="lblGroupTargetUnit" class="text-slate-400 font-bold">개 조</span>
+        </div>
+
+        <!-- 성비 균등 배분 체크 -->
+        <label class="flex items-center gap-1.5 cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800">
+          <input type="checkbox" id="chkBalanceGender" checked class="rounded border-slate-700 text-indigo-500 focus:ring-0">
+          <span class="font-bold text-slate-300">남녀 성비 균등 배분</span>
+        </label>
+      </div>
+
+      <!-- 인원 통계 요약 -->
+      <div class="flex items-center gap-3 text-slate-400">
+        <span>전체 학생: <strong id="lblTotalStudents" class="text-amber-300 font-black">0</strong>명</span>
+        <span>(남 <strong id="lblMaleCount" class="text-sky-400">0</strong> / 여 <strong id="lblFemaleCount" class="text-rose-400">0</strong>)</span>
+        <span class="text-slate-600">|</span>
+        <button id="btnCopyResultText" class="hover:text-emerald-400 transition flex items-center gap-1">
+          <i class="fa-regular fa-copy"></i> 결과 텍스트 복사
+        </button>
+      </div>
+    </div>
+
+    <!-- 칠판 배너 (교실 시각 안내) -->
+    <div id="blackboardSign" class="w-full bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-4 border-amber-900/80 rounded-2xl py-2.5 px-4 text-center shadow-xl relative overflow-hidden">
+      <div class="flex items-center justify-center gap-2 text-emerald-200 font-black tracking-widest text-base sm:text-lg">
+        <i class="fa-solid fa-chalkboard text-amber-300"></i>
+        <span>우리반 모둠 활동 자리배치표</span>
+        <i class="fa-solid fa-chalkboard text-amber-300"></i>
+      </div>
+      <p class="text-[11px] text-emerald-300/80 font-medium">칠판 / 교탁 방향</p>
+    </div>
+
+    <!-- 모둠 카드들이 배치되는 메인 컨테이너 -->
+    <main id="groupsContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      <!-- JS로 동적 생성 -->
+    </main>
+
+    <!-- 편성 결과 없을 때 빈 화면 안내 -->
+    <div id="emptyPlaceholder" class="bg-slate-900/40 border-2 border-dashed border-slate-800 rounded-3xl p-12 text-center text-slate-500 space-y-3">
+      <i class="fa-solid fa-users text-4xl text-slate-700"></i>
+      <p class="text-base font-bold text-slate-400">아직 모둠이 편성되지 않았습니다.</p>
+      <p class="text-xs">상단의 <strong>[명단 & 조건 설정]</strong>에서 학생 명단을 확인한 후 <strong>[모둠 편성 시작]</strong> 버튼을 눌러주세요.</p>
+    </div>
+
+    <!-- 하단 부가 도구 (드래그 교환 안내) -->
+    <div class="text-center text-xs text-slate-500 pt-2">
+      <p><i class="fa-solid fa-hand-pointer text-slate-400"></i> <strong>선생님 팁:</strong> 편성이 끝난 후 학생 카드를 마우스나 터치로 끌어서 다른 모둠으로 즉시 맞교환(Swap)할 수 있습니다.</p>
+    </div>
+
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- [모달 1] 교사용 명단 관리 & 은밀한 조건 설정 다이얼로그 -->
+  <!-- ======================================================== -->
+  <div id="configModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+    <div class="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- 모달 헤더 -->
+      <div class="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-600/30 text-indigo-400 flex items-center justify-center text-lg font-black border border-indigo-500/30">
+            <i class="fa-solid fa-user-gear"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-black text-white flex items-center gap-2">
+              학생 명단 및 스마트 배정 규칙
+            </h2>
+            <p class="text-xs text-slate-400">설정한 규칙은 학생 화면에 표시되지 않으며 알고리즘이 은밀하게 적용합니다.</p>
+          </div>
+        </div>
+        <button id="btnCloseConfigModal" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- 모달 탭 메뉴 -->
+      <div class="flex border-b border-slate-800 bg-slate-950/50 text-xs font-bold px-4 pt-2">
+        <button id="tabBtnRoster" class="tab-btn px-4 py-2.5 border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2">
+          <i class="fa-solid fa-clipboard-user"></i> 학생 명단 등록 (<span id="tabCount">0</span>명)
+        </button>
+        <button id="tabBtnFixed" class="tab-btn px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+          <i class="fa-solid fa-thumbtack text-amber-400"></i> 특정 모둠 고정 배치
+        </button>
+        <button id="tabBtnSeparate" class="tab-btn px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+          <i class="fa-solid fa-arrows-split-up-and-left text-rose-400"></i> 학생 격리 (붙지 않게)
+        </button>
+      </div>
+
+      <!-- 모달 본문 영역 -->
+      <div class="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+
+        <!-- [탭 1] 학생 명단 입력창 -->
+        <div id="tabContentRoster" class="space-y-4">
+          <div class="bg-indigo-950/30 border border-indigo-500/20 rounded-2xl p-3.5 text-indigo-200 text-xs space-y-1">
+            <p class="font-bold flex items-center gap-1.5 text-indigo-300">
+              <i class="fa-solid fa-lightbulb"></i> 엑셀 / 나이스 명렬표 한 번에 붙여넣기 가능!
+            </p>
+            <p class="text-slate-400 text-[11px] leading-relaxed">
+              엑셀이나 한글 표에서 <strong>[번호 이름 성별]</strong> 열을 복사(`Ctrl+C`)해서 아래에 그대로 붙여넣으세요.<br>
+              성별은 <strong>남/여</strong> 또는 <strong>M/F</strong>로 자동 인식되며, 생략 시 이름만 등록됩니다.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-300">명단 텍스트 입력 (줄바꿈 구분):</label>
+              <div class="flex gap-2">
+                <button id="btnLoadSampleRoster" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold transition">샘플 24명 불러오기</button>
+                <button id="btnClearRoster" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950 text-rose-400 font-bold transition">전체 비우기</button>
+              </div>
+            </div>
+            <textarea id="txtRosterInput" rows="8" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500 leading-relaxed" placeholder="예시 형태:&#10;1 김철수 남&#10;2 이영희 여&#10;3 박민수 남&#10;4 최수진 여&#10;5 정우진 남"></textarea>
+          </div>
+
+          <!-- 등록된 학생 리스트 미리보기 뱃지 -->
+          <div class="space-y-2">
+            <div class="font-bold text-slate-400 flex items-center justify-between">
+              <span>인식된 학생 목록:</span>
+              <span class="text-[11px] text-slate-500">클릭하면 성별 토글 (남 ↔ 여)</span>
+            </div>
+            <div id="rosterBadgesContainer" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-slate-950/80 rounded-xl border border-slate-800">
+              <!-- JS로 뱃지 렌더링 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- [탭 2] 특정 모둠 고정 배치 (Stealth Lock) -->
+        <div id="tabContentFixed" class="hidden space-y-4">
+          <div class="bg-amber-950/20 border border-amber-500/20 rounded-2xl p-3.5 text-amber-200 text-xs">
+            <p class="font-bold flex items-center gap-1.5 text-amber-300 mb-1">
+              <i class="fa-solid fa-lock text-sm"></i> 특정 학생을 특정 모둠에 무조건 배정
+            </p>
+            <p class="text-slate-400 text-[11px] leading-relaxed">
+              예: "몸이 불편하거나 특별 지도가 필요한 <strong>김철수</strong>는 무조건 <strong>1모둠</strong>에 들어가게 하기"<br>
+              학생들에게는 화면상으로 무작위 셔플 애니메이션 후 우연히 들어간 것처럼 자연스럽게 연출됩니다.
+            </p>
+          </div>
+
+          <!-- 규칙 추가 폼 -->
+          <div class="flex flex-wrap items-center gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+            <span class="text-slate-400 font-bold">학생:</span>
+            <select id="selectFixedStudent" class="bg-slate-900 border border-slate-700 text-white font-bold rounded-xl px-2.5 py-1.5 focus:outline-none text-xs">
+              <option value="">학생 선택...</option>
+            </select>
+            <span class="text-slate-400 font-bold">을(를)</span>
+            <select id="selectFixedGroupNum" class="bg-slate-900 border border-slate-700 text-amber-300 font-black rounded-xl px-2.5 py-1.5 focus:outline-none text-xs">
+              <option value="1">1 모둠</option>
+              <option value="2">2 모둠</option>
+              <option value="3">3 모둠</option>
+              <option value="4">4 모둠</option>
+              <option value="5">5 모둠</option>
+              <option value="6">6 모둠</option>
+              <option value="7">7 모둠</option>
+              <option value="8">8 모둠</option>
+            </select>
+            <span class="text-slate-400 font-bold">에 배정</span>
+            <button id="btnAddFixedRule" class="ml-auto px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition">
+              <i class="fa-solid fa-plus"></i> 규칙 추가
+            </button>
+          </div>
+
+          <!-- 설정된 고정 목록 -->
+          <div class="space-y-2">
+            <span class="font-bold text-slate-400">현재 활성화된 고정 규칙:</span>
+            <div id="fixedRulesList" class="space-y-1.5">
+              <!-- JS로 렌더링 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- [탭 3] 학생 격리 규칙 (붙지 않게 하기) -->
+        <div id="tabContentSeparate" class="hidden space-y-4">
+          <div class="bg-rose-950/20 border border-rose-500/20 rounded-2xl p-3.5 text-rose-200 text-xs">
+            <p class="font-bold flex items-center gap-1.5 text-rose-300 mb-1">
+              <i class="fa-solid fa-user-slash text-sm"></i> 절대 같은 모둠에 붙지 않게 격리
+            </p>
+            <p class="text-slate-400 text-[11px] leading-relaxed">
+              친해서 만나면 수업을 방해하는 짝꿍이나, 사소한 다툼이 있어 분리가 필요한 두 학생을 지정하세요.<br>
+              알고리즘이 두 학생을 <strong>반드시 서로 다른 모둠</strong>으로 떨어뜨려 배정합니다.
+            </p>
+          </div>
+
+          <!-- 분리 쌍 추가 폼 -->
+          <div class="flex flex-wrap items-center gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+            <span class="text-slate-400 font-bold">학생 A:</span>
+            <select id="selectSepStudentA" class="bg-slate-900 border border-slate-700 text-white font-bold rounded-xl px-2.5 py-1.5 focus:outline-none text-xs">
+              <option value="">학생 선택...</option>
+            </select>
+            <span class="text-rose-400 font-black"><i class="fa-solid fa-ban"></i></span>
+            <span class="text-slate-400 font-bold">학생 B:</span>
+            <select id="selectSepStudentB" class="bg-slate-900 border border-slate-700 text-white font-bold rounded-xl px-2.5 py-1.5 focus:outline-none text-xs">
+              <option value="">학생 선택...</option>
+            </select>
+            <button id="btnAddSepRule" class="ml-auto px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition">
+              <i class="fa-solid fa-plus"></i> 분리 규칙 추가
+            </button>
+          </div>
+
+          <!-- 설정된 분리 규칙 목록 -->
+          <div class="space-y-2">
+            <span class="font-bold text-slate-400">현재 활성화된 분리(격리) 규칙:</span>
+            <div id="sepRulesList" class="space-y-1.5">
+              <!-- JS로 렌더링 -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 모달 푸터 -->
+      <div class="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
+        <span class="text-[11px] text-slate-500">모든 설정은 이 태블릿/PC에 자동 저장됩니다.</span>
+        <button id="btnSaveConfig" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition">
+          설정 저장 및 닫기
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- [모달 2] 커스텀 알림/확인 다이얼로그 (No alert/confirm) -->
+  <!-- ======================================================== -->
+  <div id="customDialogModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-3xl max-w-xs w-full p-5 text-center shadow-2xl">
+      <div class="w-11 h-11 rounded-2xl bg-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center text-xl mb-3">
+        <i class="fa-solid fa-bell" id="dialogIcon"></i>
+      </div>
+      <p id="dialogMessage" class="text-sm font-bold text-white mb-4 leading-relaxed"></p>
+      <div class="flex gap-2 justify-center" id="dialogButtons">
+        <button id="btnDialogCancel" class="hidden flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition">취소</button>
+        <button id="btnDialogConfirm" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // 0. 다이얼로그 & 클립보드 유틸리티
+    // ============================================================
+    function showNotice(msg, icon = 'fa-bell') {
+      const modal = document.getElementById('customDialogModal');
+      document.getElementById('dialogMessage').innerHTML = msg;
+      document.getElementById('dialogIcon').className = `fa-solid ${icon}`;
+      document.getElementById('btnDialogCancel').classList.add('hidden');
+      const confirmBtn = document.getElementById('btnDialogConfirm');
+      confirmBtn.onclick = () => modal.classList.add('hidden');
+      modal.classList.remove('hidden');
+    }
+
+    function showConfirm(msg, onYes) {
+      const modal = document.getElementById('customDialogModal');
+      document.getElementById('dialogMessage').innerHTML = msg;
+      document.getElementById('dialogIcon').className = 'fa-solid fa-circle-question';
+      const cancelBtn = document.getElementById('btnDialogCancel');
+      const confirmBtn = document.getElementById('btnDialogConfirm');
+      cancelBtn.classList.remove('hidden');
+      cancelBtn.onclick = () => modal.classList.add('hidden');
+      confirmBtn.onclick = () => {
+        modal.classList.add('hidden');
+        if (typeof onYes === 'function') onYes();
+      };
+      modal.classList.remove('hidden');
+    }
+
+    function copyToClipboard(text) {
+      const tempArea = document.createElement('textarea');
+      tempArea.value = text;
+      document.body.appendChild(tempArea);
+      tempArea.select();
+      try {
+        document.execCommand('copy');
+        showNotice('모둠 편성 결과가 클립보드에 복사되었습니다!<br>한글이나 엑셀, 메신저에 바로 붙여넣기 하세요.', 'fa-check');
+      } catch (err) {
+        showNotice('복사에 실패했습니다. 수동으로 복사해주세요.', 'fa-triangle-exclamation');
+      }
+      document.body.removeChild(tempArea);
+    }
+
+    // ============================================================
+    // 1. 상태 데이터 모델 및 영구 저장소
+    // ============================================================
+    const STORAGE_KEY = 'smart_classroom_group_maker_v1';
+
+    const defaultSampleRoster = [
+      { id: 1, name: '김민준', gender: '남' },
+      { id: 2, name: '이서준', gender: '남' },
+      { id: 3, name: '박도윤', gender: '남' },
+      { id: 4, name: '최예준', gender: '남' },
+      { id: 5, name: '정시우', gender: '남' },
+      { id: 6, name: '강하준', gender: '남' },
+      { id: 7, name: '조주원', gender: '남' },
+      { id: 8, name: '윤지호', gender: '남' },
+      { id: 9, name: '장건우', gender: '남' },
+      { id: 10, name: '임우진', gender: '남' },
+      { id: 11, name: '한선우', gender: '남' },
+      { id: 12, name: '오연우', gender: '남' },
+      { id: 13, name: '김서연', gender: '여' },
+      { id: 14, name: '이서윤', gender: '여' },
+      { id: 15, name: '박지우', gender: '여' },
+      { id: 16, name: '최서현', gender: '여' },
+      { id: 17, name: '정하은', gender: '여' },
+      { id: 18, name: '강민서', gender: '여' },
+      { id: 19, name: '조지아', gender: '여' },
+      { id: 20, name: '윤윤서', gender: '여' },
+      { id: 21, name: '장채원', gender: '여' },
+      { id: 22, name: '임수아', gender: '여' },
+      { id: 23, name: '한지안', gender: '여' },
+      { id: 24, name: '오다은', gender: '여' }
+    ];
+
+    let state = {
+      roster: [],
+      fixedRules: [],   // [ { studentId: 1, groupIndex: 1 } ]
+      separateRules: [], // [ { studentAId: 1, studentBId: 2 } ]
+      groupMode: 'byGroupCount', // 'byGroupCount' | 'byMemberCount'
+      targetValue: 6,
+      balanceGender: true,
+      currentGroups: [], // [ [student, ...], ... ]
+      isPresentationMode: false
+    };
+
+    function loadState() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          state.roster = parsed.roster || [];
+          state.fixedRules = parsed.fixedRules || [];
+          state.separateRules = parsed.separateRules || [];
+          state.groupMode = parsed.groupMode || 'byGroupCount';
+          state.targetValue = parsed.targetValue || 6;
+          state.balanceGender = parsed.balanceGender !== undefined ? parsed.balanceGender : true;
+          state.currentGroups = parsed.currentGroups || [];
+        } else {
+          state.roster = defaultSampleRoster;
+        }
+      } catch (e) {
+        state.roster = defaultSampleRoster;
+      }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          roster: state.roster,
+          fixedRules: state.fixedRules,
+          separateRules: state.separateRules,
+          groupMode: state.groupMode,
+          targetValue: state.targetValue,
+          balanceGender: state.balanceGender,
+          currentGroups: state.currentGroups
+        }));
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // 2. 명단 파서 및 규칙 검증
+    // ============================================================
+    function parseRosterText(rawText) {
+      const lines = rawText.split('\n');
+      const list = [];
+      let autoId = 1;
+
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        // 탭 또는 공백으로 분리
+        const tokens = trimmed.split(/[\t, ]+/);
+        let id = autoId;
+        let name = '';
+        let gender = '미지정';
+
+        if (tokens.length === 1) {
+          name = tokens[0];
+        } else if (tokens.length === 2) {
+          if (!isNaN(tokens[0])) {
+            id = parseInt(tokens[0], 10);
+            name = tokens[1];
+          } else {
+            name = tokens[0];
+            const g = tokens[1].toLowerCase();
+            if (g === '남' || g === 'm' || g === '남자') gender = '남';
+            else if (g === '여' || g === 'f' || g === '여자') gender = '여';
+          }
+        } else if (tokens.length >= 3) {
+          if (!isNaN(tokens[0])) {
+            id = parseInt(tokens[0], 10);
+            name = tokens[1];
+            const g = tokens[2].toLowerCase();
+            if (g === '남' || g === 'm' || g === '남자') gender = '남';
+            else if (g === '여' || g === 'f' || g === '여자') gender = '여';
+          } else {
+            name = tokens[0];
+            const g = tokens[1].toLowerCase();
+            if (g === '남' || g === 'm' || g === '남자') gender = '남';
+            else if (g === '여' || g === 'f' || g === '여자') gender = '여';
+          }
+        }
+
+        if (name) {
+          list.push({ id, name, gender });
+          autoId++;
+        }
+      });
+
+      return list;
+    }
+
+    function syncRosterToTextarea() {
+      const textarea = document.getElementById('txtRosterInput');
+      const text = state.roster.map(s => `${s.id} ${s.name} ${s.gender}`).join('\n');
+      textarea.value = text;
+    }
+
+    function renderRosterBadges() {
+      const container = document.getElementById('rosterBadgesContainer');
+      container.innerHTML = '';
+
+      state.roster.forEach(s => {
+        const badge = document.createElement('span');
+        const isMale = s.gender === '남';
+        const isFemale = s.gender === '여';
+
+        badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold cursor-pointer transition select-none ${
+          isMale
+            ? 'bg-sky-950/60 border-sky-600/50 text-sky-300 hover:bg-sky-900'
+            : isFemale
+              ? 'bg-rose-950/60 border-rose-600/50 text-rose-300 hover:bg-rose-900'
+              : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+        }`;
+
+        badge.innerHTML = `
+          <span class="text-[10px] opacity-75">${s.id}</span>
+          <span>${s.name}</span>
+          <span class="text-[10px] px-1 rounded ${isMale ? 'bg-sky-500/20' : isFemale ? 'bg-rose-500/20' : 'bg-slate-600/20'}">${s.gender}</span>
+        `;
+
+        badge.title = '클릭하여 성별 변경 (남 ↔ 여 ↔ 미지정)';
+        badge.onclick = () => {
+          if (s.gender === '남') s.gender = '여';
+          else if (s.gender === '여') s.gender = '남';
+          else s.gender = '남';
+          saveState();
+          syncRosterToTextarea();
+          renderRosterBadges();
+          updateStatsUI();
+        };
+
+        container.appendChild(badge);
+      });
+
+      document.getElementById('tabCount').textContent = state.roster.length;
+      updateStudentSelectDropdowns();
+    }
+
+    function updateStudentSelectDropdowns() {
+      const fixSel = document.getElementById('selectFixedStudent');
+      const sepA = document.getElementById('selectSepStudentA');
+      const sepB = document.getElementById('selectSepStudentB');
+
+      const buildOptions = (sel, placeholder) => {
+        sel.innerHTML = `<option value="">${placeholder}</option>`;
+        state.roster.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = `${s.id}번 ${s.name} (${s.gender})`;
+          sel.appendChild(opt);
+        });
+      };
+
+      buildOptions(fixSel, '학생 선택...');
+      buildOptions(sepA, '학생 A 선택...');
+      buildOptions(sepB, '학생 B 선택...');
+    }
+
+    function renderRulesLists() {
+      // 1. 고정 규칙 렌더링
+      const fixedContainer = document.getElementById('fixedRulesList');
+      fixedContainer.innerHTML = '';
+      if (state.fixedRules.length === 0) {
+        fixedContainer.innerHTML = `<p class="text-slate-500 italic">설정된 고정 규칙이 없습니다.</p>`;
+      } else {
+        state.fixedRules.forEach((rule, idx) => {
+          const student = state.roster.find(s => s.id === rule.studentId);
+          const name = student ? `${student.id}번 ${student.name}` : `ID:${rule.studentId}`;
+          const item = document.createElement('div');
+          item.className = 'flex items-center justify-between bg-slate-950 p-2 px-3 rounded-xl border border-amber-500/30 text-amber-200';
+          item.innerHTML = `
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-thumbtack text-amber-400"></i>
+              <span><strong>${name}</strong> ➔ <strong>${rule.groupIndex}모둠</strong> 고정</span>
+            </div>
+            <button class="text-rose-400 hover:text-rose-300 font-bold px-2 py-0.5 rounded transition">
+              <i class="fa-solid fa-trash-can"></i> 삭제
+            </button>
+          `;
+          item.querySelector('button').onclick = () => {
+            state.fixedRules.splice(idx, 1);
+            saveState();
+            renderRulesLists();
+            checkActiveRulesBadge();
+          };
+          fixedContainer.appendChild(item);
+        });
+      }
+
+      // 2. 분리 규칙 렌더링
+      const sepContainer = document.getElementById('sepRulesList');
+      sepContainer.innerHTML = '';
+      if (state.separateRules.length === 0) {
+        sepContainer.innerHTML = `<p class="text-slate-500 italic">설정된 분리 규칙이 없습니다.</p>`;
+      } else {
+        state.separateRules.forEach((rule, idx) => {
+          const sA = state.roster.find(s => s.id === rule.studentAId);
+          const sB = state.roster.find(s => s.id === rule.studentBId);
+          const nameA = sA ? `${sA.id}번 ${sA.name}` : `ID:${rule.studentAId}`;
+          const nameB = sB ? `${sB.id}번 ${sB.name}` : `ID:${rule.studentBId}`;
+          const item = document.createElement('div');
+          item.className = 'flex items-center justify-between bg-slate-950 p-2 px-3 rounded-xl border border-rose-500/30 text-rose-200';
+          item.innerHTML = `
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-user-slash text-rose-400"></i>
+              <span><strong>${nameA}</strong> ✕ <strong>${nameB}</strong> (같은 조 불가)</span>
+            </div>
+            <button class="text-rose-400 hover:text-rose-300 font-bold px-2 py-0.5 rounded transition">
+              <i class="fa-solid fa-trash-can"></i> 삭제
+            </button>
+          `;
+          item.querySelector('button').onclick = () => {
+            state.separateRules.splice(idx, 1);
+            saveState();
+            renderRulesLists();
+            checkActiveRulesBadge();
+          };
+          sepContainer.appendChild(item);
+        });
+      }
+
+      checkActiveRulesBadge();
+    }
+
+    function checkActiveRulesBadge() {
+      const badge = document.getElementById('activeRulesBadge');
+      if (state.fixedRules.length > 0 || state.separateRules.length > 0) {
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+
+    function updateStatsUI() {
+      const total = state.roster.length;
+      const male = state.roster.filter(s => s.gender === '남').length;
+      const female = state.roster.filter(s => s.gender === '여').length;
+
+      document.getElementById('lblTotalStudents').textContent = total;
+      document.getElementById('lblMaleCount').textContent = male;
+      document.getElementById('lblFemaleCount').textContent = female;
+    }
+
+    // ============================================================
+    // 3. 지능형 모둠 분배 솔버 (Backtracking + Heuristic Constraint Solver)
+    // ============================================================
+    function solveGroups() {
+      const total = state.roster.length;
+      if (total === 0) {
+        showNotice('편성할 학생 명단이 없습니다. 먼저 명단을 등록해주세요.');
+        return null;
+      }
+
+      // 모둠 수 결정
+      let numGroups = 6;
+      if (state.groupMode === 'byGroupCount') {
+        numGroups = parseInt(state.targetValue, 10);
+      } else {
+        const memPerGroup = parseInt(state.targetValue, 10);
+        numGroups = Math.max(1, Math.round(total / memPerGroup));
+      }
+      if (numGroups < 1) numGroups = 1;
+      if (numGroups > total) numGroups = total;
+
+      // 최대 시도 횟수 (휴리스틱 무작위 셔플)
+      const MAX_ATTEMPTS = 3000;
+
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        // 모둠 빈 바구니 생성
+        const groups = Array.from({ length: numGroups }, () => []);
+        const assignedStudentIds = new Set();
+
+        // 1단계: 특정 모둠 고정 규칙 적용 (Stealth Pinning)
+        let conflictFound = false;
+        for (const rule of state.fixedRules) {
+          const student = state.roster.find(s => s.id === rule.studentId);
+          if (!student) continue;
+
+          // 유효한 모둠 번호인지 확인
+          const targetGIdx = Math.min(rule.groupIndex - 1, numGroups - 1);
+          groups[targetGIdx].push(student);
+          assignedStudentIds.add(student.id);
+        }
+
+        // 고정 단계에서 이미 분리 규칙이 깨졌는지 체크
+        for (const sep of state.separateRules) {
+          for (const g of groups) {
+            const hasA = g.some(s => s.id === sep.studentAId);
+            const hasB = g.some(s => s.id === sep.studentBId);
+            if (hasA && hasB) {
+              conflictFound = true;
+              break;
+            }
+          }
+          if (conflictFound) break;
+        }
+        if (conflictFound) continue;
+
+        // 2단계: 남은 학생들을 남녀별로 무작위 셔플하여 분배 준비
+        const remainingStudents = state.roster.filter(s => !assignedStudentIds.has(s.id));
+        let males = remainingStudents.filter(s => s.gender === '남');
+        let females = remainingStudents.filter(s => s.gender === '여');
+        let others = remainingStudents.filter(s => s.gender !== '남' && s.gender !== '여');
+
+        // 피셔-예이츠 셔플
+        const shuffle = (arr) => {
+          for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+          }
+        };
+        shuffle(males);
+        shuffle(females);
+        shuffle(others);
+
+        // 성비 균등 배분 플래그 확인
+        let pool = [];
+        if (state.balanceGender) {
+          // 남녀를 번갈아가며 균등하게 라운드로빈 배정 준비
+          const maxLen = Math.max(males.length, females.length, others.length);
+          for (let i = 0; i < maxLen; i++) {
+            if (i < males.length) pool.push(males[i]);
+            if (i < females.length) pool.push(females[i]);
+            if (i < others.length) pool.push(others[i]);
+          }
+        } else {
+          pool = [...males, ...females, ...others];
+          shuffle(pool);
+        }
+
+        // 3단계: 모둠에 순차 배정하며 분리 규칙 및 용량 제한 검증
+        const idealMaxCapacity = Math.ceil(total / numGroups);
+        let placeFailed = false;
+
+        for (const st of pool) {
+          // 이 학생을 넣을 수 있는 후보 모둠 찾기
+          const validGroupIndices = [];
+
+          for (let gIdx = 0; gIdx < numGroups; gIdx++) {
+            const g = groups[gIdx];
+
+            // 용량 초과 방지
+            if (g.length >= idealMaxCapacity) continue;
+
+            // 분리 규칙 위반 검사
+            let canPlace = true;
+            for (const sep of state.separateRules) {
+              if (sep.studentAId === st.id) {
+                if (g.some(mem => mem.id === sep.studentBId)) {
+                  canPlace = false;
+                  break;
+                }
+              } else if (sep.studentBId === st.id) {
+                if (g.some(mem => mem.id === sep.studentAId)) {
+                  canPlace = false;
+                  break;
+                }
+              }
+            }
+
+            if (canPlace) {
+              validGroupIndices.push(gIdx);
+            }
+          }
+
+          if (validGroupIndices.length === 0) {
+            placeFailed = true;
+            break; // 이 시도는 실패, 다음 attempt로 재시도
+          }
+
+          // 후보 중 인원수가 가장 적은 모둠에 무작위성 가미하여 배치
+          validGroupIndices.sort((a, b) => groups[a].length - groups[b].length);
+          // 최소 인원을 가진 모둠들 중 하나를 무작위 선택
+          const minLen = groups[validGroupIndices[0]].length;
+          const bestCandidates = validGroupIndices.filter(idx => groups[idx].length === minLen);
+          const chosenIdx = bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
+
+          groups[chosenIdx].push(st);
+        }
+
+        if (!placeFailed) {
+          // 모든 제약조건 완벽 통과한 최적해 발견!
+          // 내부 학생 순서도 무작위로 섞어서 "선생님이 미리 고정해둔 느낌"을 완전히 지움
+          groups.forEach(g => shuffle(g));
+          return groups;
+        }
+      }
+
+      // 수천 번 시도에도 조건이 물리적으로 충돌하는 경우 (예: 학생 2명을 격리해야 하는데 모둠이 1개뿐 등)
+      return null;
+    }
+
+    // ============================================================
+    // 4. 모둠 렌더링 & 드라마틱 셔플 애니메이션
+    // ============================================================
+    const groupColorPalettes = [
+      { border: 'border-indigo-500/40', badge: 'bg-indigo-500/20 text-indigo-300', icon: 'text-indigo-400' },
+      { border: 'border-emerald-500/40', badge: 'bg-emerald-500/20 text-emerald-300', icon: 'text-emerald-400' },
+      { border: 'border-amber-500/40', badge: 'bg-amber-500/20 text-amber-300', icon: 'text-amber-400' },
+      { border: 'border-rose-500/40', badge: 'bg-rose-500/20 text-rose-300', icon: 'text-rose-400' },
+      { border: 'border-cyan-500/40', badge: 'bg-cyan-500/20 text-cyan-300', icon: 'text-cyan-400' },
+      { border: 'border-purple-500/40', badge: 'bg-purple-500/20 text-purple-300', icon: 'text-purple-400' },
+      { border: 'border-teal-500/40', badge: 'bg-teal-500/20 text-teal-300', icon: 'text-teal-400' },
+      { border: 'border-orange-500/40', badge: 'bg-orange-500/20 text-orange-300', icon: 'text-orange-400' }
+    ];
+
+    function renderGroups(isAnimated = false) {
+      const container = document.getElementById('groupsContainer');
+      const placeholder = document.getElementById('emptyPlaceholder');
+
+      if (!state.currentGroups || state.currentGroups.length === 0) {
+        container.innerHTML = '';
+        placeholder.classList.remove('hidden');
+        return;
+      }
+
+      placeholder.classList.add('hidden');
+      container.innerHTML = '';
+
+      state.currentGroups.forEach((group, gIdx) => {
+        const pal = groupColorPalettes[gIdx % groupColorPalettes.length];
+        const card = document.createElement('div');
+        card.className = `group-card bg-slate-900 border ${pal.border} rounded-3xl p-4 shadow-xl flex flex-col transition-all duration-300 relative`;
+        card.dataset.groupIdx = gIdx;
+
+        // 드래그 오버 이벤트 등록
+        card.ondragover = (e) => {
+          e.preventDefault();
+          card.classList.add('drop-over');
+        };
+        card.ondragleave = () => {
+          card.classList.remove('drop-over');
+        };
+        card.ondrop = (e) => {
+          e.preventDefault();
+          card.classList.remove('drop-over');
+          handleDrop(e, gIdx);
+        };
+
+        // 모둠 헤더
+        const header = document.createElement('div');
+        header.className = 'flex items-center justify-between pb-3 mb-3 border-b border-slate-800';
+        header.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg ${pal.badge} flex items-center justify-center font-black text-xs">
+              ${gIdx + 1}
+            </span>
+            <h3 class="font-black text-base text-white">${gIdx + 1} 모둠</h3>
+          </div>
+          <span class="text-xs font-bold text-slate-400 bg-slate-950 px-2 py-0.5 rounded-full border border-slate-800">
+            ${group.length}명
+          </span>
+        `;
+        card.appendChild(header);
+
+        // 멤버 리스트
+        const memberList = document.createElement('div');
+        memberList.className = 'space-y-2 flex-1 min-h-[140px]';
+
+        group.forEach((member, mIdx) => {
+          const mItem = document.createElement('div');
+          const isM = member.gender === '남';
+          const isF = member.gender === '여';
+
+          mItem.draggable = true;
+          mItem.className = `p-2.5 px-3 rounded-2xl border flex items-center justify-between text-xs font-bold transition select-none cursor-grab active:cursor-grabbing ${
+            isM
+              ? 'bg-sky-950/40 border-sky-600/30 text-sky-200 hover:border-sky-500'
+              : isF
+                ? 'bg-rose-950/40 border-rose-600/30 text-rose-200 hover:border-rose-500'
+                : 'bg-slate-950 border-slate-800 text-slate-200 hover:border-slate-700'
+          }`;
+
+          if (isAnimated) {
+            mItem.classList.add('animate-flip');
+            mItem.style.animationDelay = `${(gIdx * 0.08) + (mIdx * 0.05)}s`;
+          }
+
+          mItem.innerHTML = `
+            <div class="flex items-center gap-2">
+              <span class="w-5 h-5 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono">
+                ${member.id}
+              </span>
+              <span class="text-sm font-black text-white">${member.name}</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded ${isM ? 'bg-sky-500/20 text-sky-300' : isF ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700/30 text-slate-400'}">
+              ${member.gender}
+            </span>
+          `;
+
+          // 드래그 시작 이벤트
+          mItem.ondragstart = (e) => {
+            mItem.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+              fromGroup: gIdx,
+              fromMemberIdx: mIdx,
+              studentId: member.id
+            }));
+          };
+
+          mItem.ondragend = () => {
+            mItem.classList.remove('dragging');
+          };
+
+          memberList.appendChild(mItem);
+        });
+
+        card.appendChild(memberList);
+        container.appendChild(card);
+      });
+    }
+
+    // 학생 카드 수동 스왑 / 이동 처리
+    function handleDrop(e, targetGroupIdx) {
+      const dataStr = e.dataTransfer.getData('text/plain');
+      if (!dataStr) return;
+      try {
+        const data = JSON.parse(dataStr);
+        const sourceGroupIdx = data.fromGroup;
+        const sourceMemberIdx = data.fromMemberIdx;
+
+        if (sourceGroupIdx === targetGroupIdx) return;
+
+        const sourceStudent = state.currentGroups[sourceGroupIdx].splice(sourceMemberIdx, 1)[0];
+        state.currentGroups[targetGroupIdx].push(sourceStudent);
+
+        saveState();
+        renderGroups(false);
+      } catch (err) {}
+    }
+
+    // 드라마틱 셔플 트리거
+    function executeShuffle() {
+      const result = solveGroups();
+      if (!result) {
+        showNotice(`
+          현재 설정된 <strong>조건(고정 배치 및 분리 규칙)</strong>을 모두 만족하는 모둠 조합을 찾을 수 없습니다.<br><br>
+          <span class="text-slate-400 text-xs">
+            · 모둠 수가 너무 적거나<br>
+            · 서로 다른 학생끼리 분리 규칙이 너무 빽빽하게 얽혀있는지 확인해주세요.
+          </span>
+        `, 'fa-triangle-exclamation');
+        return;
+      }
+
+      const btn = document.getElementById('btnRunShuffle');
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-base"></i> 섞는 중...`;
+
+      // 가짜 셔플 전광판 플리커 효과 연출 (0.6초간 아이들에게 시각적 긴장감 제공)
+      const container = document.getElementById('groupsContainer');
+      container.classList.add('opacity-50');
+
+      setTimeout(() => {
+        state.currentGroups = result;
+        saveState();
+        container.classList.remove('opacity-50');
+        renderGroups(true);
+
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-dice text-base"></i> 🎲 모둠 편성 시작!`;
+      }, 500);
+    }
+
+    // 결과 텍스트 복사 생성
+    function getResultText() {
+      if (!state.currentGroups || state.currentGroups.length === 0) return '';
+      let text = `[우리반 모둠 활동 편성 결과]\n`;
+      state.currentGroups.forEach((g, idx) => {
+        const names = g.map(s => `${s.name}(${s.id}번)`).join(', ');
+        text += `\n■ ${idx + 1}모둠 (${g.length}명): ${names}`;
+      });
+      return text;
+    }
+
+    // ============================================================
+    // 5. 초기화 및 이벤트 리스너 바인딩
+    // ============================================================
+    function updateHeaderDate() {
+      const dateEl = document.getElementById('headerLiveDate');
+      if (!dateEl) return;
+      const now = new Date();
+      const days = ['일', '월', '화', '수', '목', '금', '토'];
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const date = String(now.getDate()).padStart(2, '0');
+      const dayName = days[now.getDay()];
+      dateEl.textContent = `${year}. ${month}. ${date}. (${dayName})`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadState();
+      updateHeaderDate();
+      syncRosterToTextarea();
+      renderRosterBadges();
+      renderRulesLists();
+      updateStatsUI();
+
+      // UI 입력값 복원
+      document.getElementById('selectGroupMode').value = state.groupMode;
+      document.getElementById('inputGroupTargetValue').value = state.targetValue;
+      document.getElementById('chkBalanceGender').checked = state.balanceGender;
+      updateGroupModeLabels();
+
+      // 기존 저장된 모둠 결과가 있다면 복원
+      if (state.currentGroups && state.currentGroups.length > 0) {
+        renderGroups(false);
+      }
+
+      // 모둠 편성 기준 변경
+      document.getElementById('selectGroupMode').addEventListener('change', (e) => {
+        state.groupMode = e.target.value;
+        if (state.groupMode === 'byGroupCount' && state.targetValue > 15) {
+          state.targetValue = 6;
+        } else if (state.groupMode === 'byMemberCount' && state.targetValue > 10) {
+          state.targetValue = 4;
+        }
+        document.getElementById('inputGroupTargetValue').value = state.targetValue;
+        updateGroupModeLabels();
+        saveState();
+      });
+
+      document.getElementById('inputGroupTargetValue').addEventListener('change', (e) => {
+        let val = parseInt(e.target.value, 10);
+        if (isNaN(val) || val < 2) val = 2;
+        if (val > 30) val = 30;
+        state.targetValue = val;
+        e.target.value = val;
+        saveState();
+      });
+
+      document.getElementById('chkBalanceGender').addEventListener('change', (e) => {
+        state.balanceGender = e.target.checked;
+        saveState();
+      });
+
+      // 모둠 편성 실행 버튼
+      document.getElementById('btnRunShuffle').addEventListener('click', executeShuffle);
+
+      // 텍스트 복사 버튼
+      document.getElementById('btnCopyResultText').addEventListener('click', () => {
+        const txt = getResultText();
+        if (!txt) {
+          showNotice('아직 복사할 모둠 결과가 없습니다.');
+          return;
+        }
+        copyToClipboard(txt);
+      });
+
+      // 칠판 집중 모드 토글
+      document.getElementById('btnTogglePresentation').addEventListener('click', () => {
+        state.isPresentationMode = !state.isPresentationMode;
+        const quick = document.getElementById('quickSettingsBar');
+        const txt = document.getElementById('txtPresentation');
+        const icon = document.querySelector('#btnTogglePresentation i');
+
+        if (state.isPresentationMode) {
+          quick.classList.add('hidden');
+          txt.textContent = '일반 보기로 복귀';
+          icon.className = 'fa-solid fa-compress text-indigo-400';
+        } else {
+          quick.classList.remove('hidden');
+          txt.textContent = '칠판 집중 모드';
+          icon.className = 'fa-solid fa-expand text-amber-400';
+        }
+      });
+
+      // ------------------------------------------------------------
+      // 모달 관리 & 탭 전환
+      // ------------------------------------------------------------
+      const modal = document.getElementById('configModal');
+      document.getElementById('btnOpenConfigModal').addEventListener('click', () => {
+        syncRosterToTextarea();
+        renderRosterBadges();
+        renderRulesLists();
+        modal.classList.remove('hidden');
+      });
+
+      const closeModal = () => modal.classList.add('hidden');
+      document.getElementById('btnCloseConfigModal').addEventListener('click', closeModal);
+      document.getElementById('btnSaveConfig').addEventListener('click', closeModal);
+
+      // 탭 전환 핸들러
+      const tabs = [
+        { btn: document.getElementById('tabBtnRoster'), content: document.getElementById('tabContentRoster') },
+        { btn: document.getElementById('tabBtnFixed'), content: document.getElementById('tabContentFixed') },
+        { btn: document.getElementById('tabBtnSeparate'), content: document.getElementById('tabContentSeparate') }
+      ];
+
+      tabs.forEach(({ btn, content }) => {
+        btn.addEventListener('click', () => {
+          tabs.forEach(t => {
+            t.btn.className = 'tab-btn px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2';
+            t.content.classList.add('hidden');
+          });
+          btn.className = 'tab-btn px-4 py-2.5 border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2';
+          content.classList.remove('hidden');
+        });
+      });
+
+      // 텍스트 입력창 실시간 파싱
+      document.getElementById('txtRosterInput').addEventListener('input', (e) => {
+        state.roster = parseRosterText(e.target.value);
+        saveState();
+        renderRosterBadges();
+        updateStatsUI();
+      });
+
+      // 샘플 명단 로드
+      document.getElementById('btnLoadSampleRoster').addEventListener('click', () => {
+        showConfirm('샘플 명단(24명)으로 교체하시겠습니까?', () => {
+          state.roster = [...defaultSampleRoster];
+          saveState();
+          syncRosterToTextarea();
+          renderRosterBadges();
+          updateStatsUI();
+        });
+      });
+
+      // 명단 비우기
+      document.getElementById('btnClearRoster').addEventListener('click', () => {
+        showConfirm('정말 모든 명단을 지우시겠습니까?', () => {
+          state.roster = [];
+          state.fixedRules = [];
+          state.separateRules = [];
+          saveState();
+          syncRosterToTextarea();
+          renderRosterBadges();
+          renderRulesLists();
+          updateStatsUI();
+        });
+      });
+
+      // 고정 규칙 추가
+      document.getElementById('btnAddFixedRule').addEventListener('click', () => {
+        const studentId = parseInt(document.getElementById('selectFixedStudent').value, 10);
+        const groupIndex = parseInt(document.getElementById('selectFixedGroupNum').value, 10);
+
+        if (!studentId) {
+          showNotice('고정할 학생을 선택해주세요.');
+          return;
+        }
+
+        // 이미 고정된 학생인지 확인
+        const existingIdx = state.fixedRules.findIndex(r => r.studentId === studentId);
+        if (existingIdx >= 0) {
+          state.fixedRules[existingIdx].groupIndex = groupIndex;
+        } else {
+          state.fixedRules.push({ studentId, groupIndex });
+        }
+
+        saveState();
+        renderRulesLists();
+      });
+
+      // 분리 규칙 추가
+      document.getElementById('btnAddSepRule').addEventListener('click', () => {
+        const sA = parseInt(document.getElementById('selectSepStudentA').value, 10);
+        const sB = parseInt(document.getElementById('selectSepStudentB').value, 10);
+
+        if (!sA || !sB) {
+          showNotice('분리할 두 학생을 모두 선택해주세요.');
+          return;
+        }
+        if (sA === sB) {
+          showNotice('동일한 학생을 분리 대상으로 지정할 수 없습니다.');
+          return;
+        }
+
+        // 이미 존재하는 쌍인지 확인
+        const exists = state.separateRules.some(
+          r => (r.studentAId === sA && r.studentBId === sB) || (r.studentAId === sB && r.studentBId === sA)
+        );
+        if (exists) {
+          showNotice('이미 등록된 분리 규칙입니다.');
+          return;
+        }
+
+        state.separateRules.push({ studentAId: sA, studentBId: sB });
+        saveState();
+        renderRulesLists();
+      });
+    });
+
+    function updateGroupModeLabels() {
+      const lbl = document.getElementById('lblGroupTargetUnit');
+      if (state.groupMode === 'byGroupCount') {
+        lbl.textContent = '개 조';
+      } else {
+        lbl.textContent = '명씩 편성';
+      }
+    }
+  </script>
+</body>
+</html>
